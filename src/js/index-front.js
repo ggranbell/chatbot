@@ -9,13 +9,63 @@ const frontEndElem = {
     chatBoxMain : document.querySelector('.chat-box-main'),
     chatBubble : document.querySelectorAll('.chat'),
     chatLoadingAnimation : document.querySelector('.chat-loading-animation'),
-    viewDbChunksBtn : document.getElementById('view-db-chunks-btn'),
-    showDbSchemaBtn : document.getElementById('show-db-schema-btn'),
-    clearKnowledgeBaseBtn : document.getElementById('clear-kb-btn'),
     uploadKnowledgeBaseBtn : document.querySelector('#upload-knowledge-btn'),
     uploadKnowledgeBaseFileInput : document.getElementById('dropzone-file'),
-    uploadKnowledgeBaseFileNameDisplay : document.getElementById('file-name')
+    uploadKnowledgeBaseFileNameDisplay : document.getElementById('file-name'),
+    viewDbRowsBtn: document.getElementById('view-db-rows-btn'),
+    truncateDbBtn: document.getElementById('truncate-db-btn'),
 };
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function renderDebugDetails(result) {
+    const timeLogs = result?.timeLogs || {};
+    const selectedChunks = Array.isArray(result?.selectedChunks) ? result.selectedChunks : [];
+
+    const timeLogItems = Object.entries(timeLogs)
+        .map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(value)} ms</li>`)
+        .join('');
+
+    const chunkItems = selectedChunks
+        .map(chunk => {
+            const previewText = (chunk.text || '').slice(0, 220);
+            return `
+                <li>
+                    <strong>#${escapeHtml(chunk.rank)}</strong>
+                    | label: <strong>${escapeHtml(chunk.label)}</strong>
+                    | score: ${escapeHtml(chunk.hybridScore)}
+                    | vec: ${escapeHtml(chunk.vectorScore)}
+                    | lex: ${escapeHtml(chunk.lexicalScore)}
+                    | kw: ${escapeHtml(chunk.keywordCoverageScore)}
+                    | distance: ${escapeHtml(chunk.vectorDistance)}
+                    <br />
+                    <em>keywords:</em> ${escapeHtml(chunk.keywords)}
+                    <br />
+                    <em>text:</em> ${escapeHtml(previewText)}${(chunk.text || '').length > 220 ? '...' : ''}
+                </li>
+            `;
+        })
+        .join('');
+
+    return `
+        <details class="mt-4">
+            <summary><strong>Debug: Time Logs & Selected Chunks</strong></summary>
+            <div class="mt-2">
+                <h4><strong>Time Logs</strong></h4>
+                ${timeLogItems ? `<ul>${timeLogItems}</ul>` : '<p>No timing logs available.</p>'}
+                <h4><strong>Selected Chunks (${selectedChunks.length})</strong></h4>
+                ${chunkItems ? `<ol>${chunkItems}</ol>` : '<p>No selected chunks available.</p>'}
+            </div>
+        </details>
+    `;
+}
 
 
 
@@ -65,15 +115,6 @@ frontEndElem.sendQuestionBtn.addEventListener('click', async (e) => {
 
     if(message.length > 0) {
         frontEndElem.chatLoadingAnimation.classList.replace('hidden', 'block')
-        
-        // Add time tracking element to loading animation
-        let timerElement = frontEndElem.chatLoadingAnimation.querySelector('.processing-timer');
-        if (!timerElement) {
-            timerElement = document.createElement('span');
-            timerElement.className = 'processing-timer text-xs text-gray-400 ml-2';
-            frontEndElem.chatLoadingAnimation.appendChild(timerElement);
-        }
-        
         const divElem = document.createElement('div');
         divElem.classList.add('chat', 'chat-end');
         divElem.innerHTML = `
@@ -86,28 +127,8 @@ frontEndElem.sendQuestionBtn.addEventListener('click', async (e) => {
         frontEndElem.questionTextarea.value ='';
         frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
 
-        // Start timer
-        const startTime = Date.now();
-        const timerInterval = setInterval(() => {
-            const elapsedSeconds = ((Date.now() - startTime) / 1000).toFixed(1);
-            timerElement.textContent = `⏱️ ${elapsedSeconds}s`;
-        }, 100);
-
-        const traceBox = document.createElement('div');
-        traceBox.classList.add('w-full', 'h-auto', 'px-4', 'py-3', 'text-wrap', 'break-all', 'ai-response');
-        traceBox.innerHTML = '<div class="font-semibold">RAG Processing Logs</div><div class="trace-lines text-sm leading-6 opacity-80"></div>';
-        const traceLines = traceBox.querySelector('.trace-lines');
-        frontEndElem.chatBoxMain.insertBefore(traceBox, frontEndElem.chatLoadingAnimation);
-
-        const appendTrace = (line) => {
-            const logLine = document.createElement('div');
-            logLine.textContent = line;
-            traceLines.appendChild(logLine);
-            frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
-        };
-
         try {
-            const response = await fetch('http://localhost:8080/ask-ai-with-vector-stream', {
+            const response = await fetch('http://localhost:8080/ask-ai-with-vector', {
                 method : 'POST',
                 headers : {
                     'Content-Type' : 'application/json',
@@ -116,72 +137,37 @@ frontEndElem.sendQuestionBtn.addEventListener('click', async (e) => {
                 body : JSON.stringify({ message } )
             });
 
-            if (!response.ok || !response.body) {
-                throw new Error('Server Error');
+            const contentType = response.headers.get('content-type') || '';
+            const isJson = contentType.includes('application/json');
+            const result = isJson ? await response.json() : { message: await response.text() };
+
+            if (!response.ok) {
+                throw new Error(result?.message || result?.error || 'Request failed');
             }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let finalResult = null;
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const rawLine of lines) {
-                    const line = rawLine.trim();
-                    if (!line) continue;
-
-                    let event;
-                    try {
-                        event = JSON.parse(line);
-                    } catch (_) {
-                        continue;
-                    }
-
-                    if (event.type === 'log') {
-                        const time = new Date(event.timestamp).toLocaleTimeString();
-                        appendTrace(`[${time}] ${event.step} | +${event.durationMs}ms | total ${event.elapsedMs}ms`);
-                    }
-
-                    if (event.type === 'error') {
-                        throw new Error(event.message || 'Server Error');
-                    }
-
-                    if (event.type === 'result') {
-                        finalResult = event;
-                    }
-                }
-            }
-
-            if (!finalResult) {
-                throw new Error('No final result received from server');
-            }
-
-            clearInterval(timerInterval);
-            timerElement.textContent = `✅ Processing time: ${finalResult.processingTime}`;
 
             const newAIReply = document.createElement('div');
             newAIReply.classList.add('w-full', 'h-auto', 'px-4', 'py-6', 'leading-10', 'text-wrap', 'break-all', 'ai-response');
 
-            const convertedMarkDown = marked.parse(finalResult.response)
-            newAIReply.innerHTML = convertedMarkDown;
+            const convertedMarkDown = marked.parse(result.response)
+            const debugDetails = renderDebugDetails(result);
+            newAIReply.innerHTML = `${convertedMarkDown}${debugDetails}`;
             frontEndElem.chatBoxMain.insertBefore(newAIReply, frontEndElem.chatLoadingAnimation);
-            frontEndElem.chatLoadingAnimation.classList.replace('block', 'hidden');
             frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
-            return;
         } catch (error) {
-            clearInterval(timerInterval);
-            timerElement.textContent = '❌ Failed';
-            appendTrace(`Error: ${error.message}`);
-            alert(error.message);
+            const errorBubble = document.createElement('div');
+            errorBubble.classList.add('chat', 'chat-start');
+            errorBubble.innerHTML = `
+                <div class="chat-bubble chat-bubble-error text-wrap h-auto break-all">
+                    ${escapeHtml(error?.message || 'Something went wrong. Please try again.')}
+                </div>
+            `;
+            frontEndElem.chatBoxMain.insertBefore(errorBubble, frontEndElem.chatLoadingAnimation);
+            frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
+        } finally {
             frontEndElem.chatLoadingAnimation.classList.replace('block', 'hidden');
+            frontEndElem.sendQuestionBtn.disabled = false;
         }
+        return;
     }
 
 });
@@ -249,7 +235,17 @@ frontEndElem.uploadKnowledgeBaseBtn.addEventListener('click', async(e) => {
             body : formData
         });
 
-        if(!response.ok) throw new Error('Server Error');
+        if(!response.ok) {
+            let errorMessage = 'Server Error';
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.details || errorData.error || errorMessage;
+            } catch {
+                const fallbackText = await response.text();
+                if (fallbackText) errorMessage = fallbackText;
+            }
+            throw new Error(errorMessage);
+        }
 
         const responseData = await response.json();
         alert(responseData.message)
@@ -261,124 +257,68 @@ frontEndElem.uploadKnowledgeBaseBtn.addEventListener('click', async(e) => {
     
 })
 
-frontEndElem.viewDbChunksBtn.addEventListener('click', async (e) => {
+
+frontEndElem.viewDbRowsBtn.addEventListener('click', async (e) => {
     e.preventDefault();
 
-    frontEndElem.chatLoadingAnimation.classList.replace('hidden', 'block');
-
     try {
-        const response = await fetch('/db-chunks', {
+        const response = await fetch('/admin/db-rows?limit=20', {
             method: 'GET',
             headers: {
                 'x-auth-key': 'SDP-AI-SERVER'
             }
         });
 
-        const result = await response.json();
-
+        const data = await response.json();
         if (!response.ok) {
-            throw new Error(result.message || 'Failed to fetch chunks');
+            throw new Error(data.message || 'Failed to fetch rows');
         }
 
-        const chunksView = document.createElement('div');
-        chunksView.classList.add('w-full', 'h-auto', 'px-4', 'py-6', 'leading-7', 'text-wrap', 'break-all', 'ai-response');
+        const formattedRows = data.rows.map((row) => ({
+            id: row.id,
+            label: row.label,
+            keywords: row.keywords,
+            text: (row.text || '').slice(0, 240)
+        }));
 
-        const header = `## DB Chunks (${result.count})\n\n`;
-        const chunksMarkdown = result.chunks.map((chunk) => {
-            const fullText = chunk.text || '';
+        const dbViewElem = document.createElement('div');
+        dbViewElem.classList.add('w-full', 'h-auto', 'px-4', 'py-6', 'text-wrap', 'break-all', 'ai-response');
+        dbViewElem.innerHTML = `
+            <h3><strong>DB Rows Preview</strong></h3>
+            <p>Total rows: <strong>${data.total}</strong></p>
+            <pre>${JSON.stringify(formattedRows, null, 2)}</pre>
+        `;
 
-            return `### Chunk ${chunk.chunkIndex}\n\n- **Label:** ${chunk.label}\n- **Keywords:** ${chunk.keywords}\n- **Text:** ${fullText}`;
-        }).join('\n\n---\n\n');
-
-        chunksView.innerHTML = marked.parse(header + chunksMarkdown);
-        frontEndElem.chatBoxMain.insertBefore(chunksView, frontEndElem.chatLoadingAnimation);
+        frontEndElem.chatBoxMain.insertBefore(dbViewElem, frontEndElem.chatLoadingAnimation);
         frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
     } catch (error) {
-        alert(error.message);
-    } finally {
-        frontEndElem.chatLoadingAnimation.classList.replace('block', 'hidden');
-    }
-})
-
-frontEndElem.showDbSchemaBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
-
-    frontEndElem.chatLoadingAnimation.classList.replace('hidden', 'block');
-
-    try {
-        const response = await fetch('/db-schema', {
-            method: 'GET',
-            headers: {
-                'x-auth-key': 'SDP-AI-SERVER'
-            }
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.message || 'Failed to fetch schema');
-        }
-
-        const schemaView = document.createElement('div');
-        schemaView.classList.add('w-full', 'h-auto', 'px-4', 'py-6', 'leading-7', 'text-wrap', 'break-all', 'ai-response');
-
-        const header = `## DB Schema (${result.fieldCount} fields)\n\n`;
-        const fieldsMarkdown = result.fields
-            .map((field, index) => `${index + 1}. **${field.name}** — ${field.type} (nullable: ${field.nullable})`)
-            .join('\n');
-
-        schemaView.innerHTML = marked.parse(header + fieldsMarkdown);
-        frontEndElem.chatBoxMain.insertBefore(schemaView, frontEndElem.chatLoadingAnimation);
-        frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
-    } catch (error) {
-        alert(error.message);
-    } finally {
-        frontEndElem.chatLoadingAnimation.classList.replace('block', 'hidden');
+        alert(error.message || 'Failed to fetch database rows.');
     }
 });
 
-frontEndElem.clearKnowledgeBaseBtn.addEventListener('click', async (e) => {
+
+frontEndElem.truncateDbBtn.addEventListener('click', async (e) => {
     e.preventDefault();
 
-    const isConfirmed = confirm('Clear all rows in knowledge base? This cannot be undone.');
-    if (!isConfirmed) {
-        return;
-    }
-
-    frontEndElem.chatLoadingAnimation.classList.replace('hidden', 'block');
+    const proceed = window.confirm('This will delete all rows in knowledge_base. Continue?');
+    if (!proceed) return;
 
     try {
-        const response = await fetch('/clear-knowledge-base', {
+        const response = await fetch('/admin/db-truncate', {
             method: 'POST',
             headers: {
                 'x-auth-key': 'SDP-AI-SERVER'
             }
         });
 
-        const result = await response.json();
-
+        const data = await response.json();
         if (!response.ok) {
-            throw new Error(result.message || 'Failed to clear knowledge base');
+            throw new Error(data.message || 'Failed to truncate table');
         }
 
-        const clearResultView = document.createElement('div');
-        clearResultView.classList.add('w-full', 'h-auto', 'px-4', 'py-6', 'leading-7', 'text-wrap', 'break-all', 'ai-response');
-
-        const clearMarkdown = [
-            '## Knowledge Base Cleared',
-            '',
-            `- **Before:** ${result.beforeCount} rows`,
-            `- **After:** ${result.afterCount} rows`,
-            `- **Status:** ${result.message}`,
-        ].join('\n');
-
-        clearResultView.innerHTML = marked.parse(clearMarkdown);
-        frontEndElem.chatBoxMain.insertBefore(clearResultView, frontEndElem.chatLoadingAnimation);
-        frontEndElem.chatBoxMain.scrollTop = frontEndElem.chatBoxMain.scrollHeight;
+        alert(data.message || 'Database truncated.');
     } catch (error) {
-        alert(error.message);
-    } finally {
-        frontEndElem.chatLoadingAnimation.classList.replace('block', 'hidden');
+        alert(error.message || 'Failed to truncate database.');
     }
 });
 
