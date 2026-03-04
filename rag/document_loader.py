@@ -235,13 +235,17 @@ def _extract_tables_from_page(page: fitz.Page) -> list[str]:
 def _blocks_to_structured_text(blocks: list[dict], body_font_size: float) -> str:
     parts: list[str] = []
     prev_type: str | None = None
+    import re
     for block in blocks:
         block_type = _classify_block(block, body_font_size)
         text = block["text"].strip()
         if not text:
             continue
+        # Insert a space between lowercase-uppercase or number-uppercase (Notion PDF issue)
+        text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
         if block_type == "heading":
-            parts.append(f"\n\n## {text}\n")
+            # Add extra newline after heading for Notion PDFs
+            parts.append(f"\n\n## {text}\n\n")
             prev_type = "heading"
         elif block_type == "table_row":
             if prev_type != "table_row":

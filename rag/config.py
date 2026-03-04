@@ -10,30 +10,31 @@ import os
 # Ollama models
 # ---------------------------------------------------------------------------
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-CHAT_MODEL: str = os.getenv("OLLAMA_CHAT_MODEL", "llama3.2:1b")
+CHAT_MODEL: str = os.getenv("OLLAMA_CHAT_MODEL", "deepseek-r1:8b")
 EMBEDDING_MODEL: str = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 
 # ---------------------------------------------------------------------------
 # Retrieval tuning
 # ---------------------------------------------------------------------------
-# Tuned for llama3.2:1b (~2k–4k context window, limited reasoning).
-# Strategy: cast a wide retrieval net, but send very few, focused chunks.
-VECTOR_TOP_K: int = int(os.getenv("VECTOR_TOP_K", "10"))
-BM25_TOP_K: int = int(os.getenv("BM25_TOP_K", "10"))
-FINAL_CONTEXT_K: int = int(os.getenv("FINAL_CONTEXT_K", "2"))
-MAX_CHUNKS_PER_LABEL: int = int(os.getenv("MAX_CHUNKS_PER_LABEL", "2"))
+
+# Tuned for DeepSeek R1 8B (larger context window, more reasoning capacity).
+# Strategy: retrieve more, use larger/fewer chunks to maximize context usage.
+VECTOR_TOP_K: int = int(os.getenv("VECTOR_TOP_K", "20"))
+BM25_TOP_K: int = int(os.getenv("BM25_TOP_K", "20"))
+FINAL_CONTEXT_K: int = int(os.getenv("FINAL_CONTEXT_K", "6"))
+MAX_CHUNKS_PER_LABEL: int = int(os.getenv("MAX_CHUNKS_PER_LABEL", "3"))
 
 # Weights for EnsembleRetriever (BM25 vs Vector). Must sum to 1.0.
-# Higher vector weight because semantic match matters more for small models.
-BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.35"))
-VECTOR_WEIGHT: float = float(os.getenv("VECTOR_WEIGHT", "0.65"))
+# Larger models can balance BM25 and vector more evenly.
+BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.5"))
+VECTOR_WEIGHT: float = float(os.getenv("VECTOR_WEIGHT", "0.5"))
 
 # ---------------------------------------------------------------------------
 # Chunking
 # ---------------------------------------------------------------------------
-# Smaller chunks = more precise retrieval and less wasted context for a 1b model.
-CHUNK_TARGET_TOKENS: int = int(os.getenv("CHUNK_TARGET_TOKENS", "150"))
-CHUNK_OVERLAP_TOKENS: int = int(os.getenv("CHUNK_OVERLAP_TOKENS", "25"))
+# Larger chunks = more efficient for bigger models with larger context.
+CHUNK_TARGET_TOKENS: int = int(os.getenv("CHUNK_TARGET_TOKENS", "1200"))
+CHUNK_OVERLAP_TOKENS: int = int(os.getenv("CHUNK_OVERLAP_TOKENS", "100"))
 
 # ---------------------------------------------------------------------------
 # Vector DB
