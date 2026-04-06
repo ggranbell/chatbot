@@ -56,6 +56,7 @@ def _chunk_debug_info(chunks: list) -> list[dict[str, Any]]:
                 "label": meta.get("label", "N/A"),
                 "keywords": meta.get("keywords", ""),
                 "rrfScore": meta.get("rrf_score", 0),
+                "rerankScore": meta.get("rerank_score"),
                 "bm25Rrf": meta.get("bm25_rrf", 0),
                 "vectorRrf": meta.get("vector_rrf", 0),
                 "vectorDistance": round(dist, 6) if isinstance(dist, (int, float)) else None,

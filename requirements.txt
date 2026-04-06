@@ -16,6 +16,9 @@ lancedb
 # Retrieval
 rank_bm25
 
+# Reranking
+sentence-transformers
+
 # PDF extraction
 pymupdf
 

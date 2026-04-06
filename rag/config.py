@@ -34,6 +34,10 @@ BM25_TOP_K: int = int(os.getenv("BM25_TOP_K", "15"))
 FINAL_CONTEXT_K: int = int(os.getenv("FINAL_CONTEXT_K", "5"))
 MAX_CHUNKS_PER_LABEL: int = int(os.getenv("MAX_CHUNKS_PER_LABEL", "2"))
 
+# Cross-encoder reranker (sentence-transformers)
+RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+RERANKER_TOP_K: int = int(os.getenv("RERANKER_TOP_K", "10"))
+
 # Weights for EnsembleRetriever (BM25 vs Vector). Must sum to 1.0.
 # Qwen has strong semantic embeddings; favour vector retrieval slightly.
 BM25_WEIGHT: float = float(os.getenv("BM25_WEIGHT", "0.35"))

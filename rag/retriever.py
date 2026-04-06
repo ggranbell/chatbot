@@ -24,9 +24,11 @@ from rag.config import (
     BM25_WEIGHT,
     FINAL_CONTEXT_K,
     MAX_CHUNKS_PER_LABEL,
+    RERANKER_TOP_K,
     VECTOR_TOP_K,
     VECTOR_WEIGHT,
 )
+from rag.reranker import rerank
 from rag.vectorstore import load_all_documents, similarity_search
 
 
@@ -215,16 +217,15 @@ def retrieve(query: str) -> tuple[list[Document], dict[str, Any]]:
     )
     timing["rrfMs"] = int((_time.time() - t0) * 1000)
 
-    # Minimum-score filter — drop chunks that scored too low to be useful.
-    # Threshold: 40% of the theoretical max RRF score (rank #1 in both lists).
-    max_possible = (BM25_WEIGHT + VECTOR_WEIGHT) / (60 + 0 + 1)
-    min_score = max_possible * 0.40
-    scored = [d for d in fused if (d.metadata.get("rrf_score", 0) >= min_score)]
-    if not scored:
-        scored = fused[:FINAL_CONTEXT_K]  # fallback: keep top-K anyway
-    timing["postFilterCount"] = len(scored)
+    # Cross-encoder reranker — score (query, doc) pairs jointly for
+    # far more accurate relevance than rank-position-based RRF alone.
+    candidates = fused[:RERANKER_TOP_K]
+    t0 = _time.time()
+    reranked = rerank(query, candidates, top_k=RERANKER_TOP_K)
+    timing["rerankMs"] = int((_time.time() - t0) * 1000)
+    timing["rerankCandidates"] = len(candidates)
 
     # Diversity filter → final K
-    result = _diversify(scored, k=FINAL_CONTEXT_K)
+    result = _diversify(reranked, k=FINAL_CONTEXT_K)
     timing["finalChunks"] = len(result)
     return result, timing
