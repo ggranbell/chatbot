@@ -1,6 +1,4 @@
-<div align="center">
-  <img src="assets/banner.png" alt="Mola Chatbot Banner" width="100%">
-  
+
 # 🤖 Mola Chatbot
 
   *A high-performance, local-first RAG ecosystem powered by LangChain and Ollama.*
